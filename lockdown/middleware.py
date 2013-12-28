@@ -6,8 +6,10 @@ from django.shortcuts import render_to_response
 from django.template import RequestContext
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.importlib import import_module
+from django.utils import timezone
 
 from lockdown import settings
+from lockdown.models import TempUnlock
 
 
 def compile_url_exceptions(url_exceptions):
@@ -69,6 +71,28 @@ class LockdownMiddleware(object):
         for pattern in url_exceptions:
             if pattern.search(request.path):
                 return None
+        
+        # Unlock temporarily if provided unlock string
+        if request.GET.has_key('unlock'):
+            unlock_pass = request.GET['unlock']
+            
+            if unlock_pass is not None and unlock_pass == settings.TEMP_UNLOCK_PASS:
+                
+                # first look for existing
+                unlocked_records = TempUnlock.objects.filter(expires__gt=timezone.now())
+                
+                # otherwise create it
+                if len(unlocked_records) > 0:
+                    unlock_record = unlocked_records[unlocked_records.count() - 1]
+                else:
+                    unlock_record = TempUnlock.objects.create()
+                
+                unlock_record.save()
+        
+        # Don't lock down if temporarily unlocked
+        unlocked_records = TempUnlock.objects.filter(expires__gt=timezone.now())
+        if len(unlocked_records) > 0:
+            return None
 
         # Don't lock down if outside of the lockdown dates.
         if self.until_date is None:
